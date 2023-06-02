@@ -36,6 +36,7 @@ function NotifySoloPlayerSurrounded()
 }
 
 /** Calculate the overall status of the player's rank and performance */
+//Modified to include boss waves as well
 function UpdateOverallStatus()
 {
     local float PerkRankModifier;

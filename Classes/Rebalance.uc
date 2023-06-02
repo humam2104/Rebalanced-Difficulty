@@ -1,6 +1,10 @@
 class Rebalance extends KFMutator;
 
 var KFGameInfo KFGI;
+var float MagSizeMultiplier;
+var float HitDamageMultiplier;
+var float PickupScaleMultiplier;
+var LinearColor CustomEnragedGlowColor;
 
 function InitMutator(string Options, out string ErrorMessage)
 {
@@ -40,12 +44,13 @@ function SetGameConductor()
 	
 	KFGI = KFGameInfo(WorldInfo.Game);
 	KFGI.GameLengthDoshScale[0]=1.85; // Short
-	KFGI.GameLengthDoshScale[1]=1.20;  // Medium
+	KFGI.GameLengthDoshScale[1]=1.40;  // Medium
 	KFGI.GameLengthDoshScale[2]=1.1;  // Long
 	KFGI.bPauseable = true;
 	`log("*** Dosh Scale Modified ***");
-	
 	KFGI.GameConductorClass = class'Rebalanced-Difficulty.KFGameConductor2';
+	KFGI.DifficultyInfoClass=class'Rebalanced-Difficulty.KFGameDifficultyInfo2';
+	KFGI.DefaultPawnClass=class'Rebalanced-Difficulty.KFPawn_Human2';
 }
 
 	
@@ -62,28 +67,30 @@ simulated function bool IsBossPawn(KfPawn P)
 }
 
 function bool IsTraderWave()
+{
+	if (KFGI.MyKFGRI.bTraderIsOpen)
 	{
-		if (KFGI.MyKFGRI.bTraderIsOpen)
-		{
-			return true;
-		}
-		else if (KFGI.MyKFGRI.bTraderIsOpen == false)
-		{
-			return false;
-		}
+		return true;
 	}
+	else if (KFGI.MyKFGRI.bTraderIsOpen == false)
+	{
+		return false;
+	}
+}
 	
 function ModifyAIEnemy(AIController AI, Pawn Enemy)
+{
+	local int i;
+	local KFPawn_Monster Zed_HealthModded;
+	local KFPawn_Monster Zed_HeadModded;
+	local KFPawn_Monster Zed_ResistModded;
+	local KFPawn_Monster Zed_SpeedModded;
+	local KFAIPluginRage_Fleshpound AI_FleshPound;
+	local KFAIController AI_NoTeleport;
+	local KFAIController_ZedMatriarch NerfedBossMatriarch;
+	super.ModifyAIEnemy(AI, Enemy);
+	if (AI != None && Enemy != None)
 	{
-		local int i;
-		local KFPawn_Monster Zed_HealthModded;
-		local KFPawn_Monster Zed_HeadModded;
-		local KFPawn_Monster Zed_ResistModded;
-		local KFPawn_Monster Zed_SpeedModded;
-		local KFAIPluginRage_Fleshpound AI_FleshPound;
-		local KFAIController AI_NoTeleport;
-		local KFAIController_ZedMatriarch NerfedBossMatriarch;
-
 		//Increase Fleshpound rage Timer 14 + Random Value
 		if (KFAIController_ZedFleshpound(AI).RagePlugin != None)
 		{
@@ -97,7 +104,7 @@ function ModifyAIEnemy(AIController AI, Pawn Enemy)
 		if (KFPawn_ZedClot_AlphaKing(KFAIController(AI).Pawn) != None)
 		{
 			Zed_HealthModded = KFPawn_Monster(KFAIController(AI).Pawn);
-			Zed_HealthModded.Health = 200;
+			Zed_HealthModded.Health = 175;
 		}
 		//Stalkers, Gorefiends, and Rioters aren't allowed to teleport to player
 		if (KFAIController_ZedStalker(AI) != None || 
@@ -144,34 +151,131 @@ function ModifyAIEnemy(AIController AI, Pawn Enemy)
 				Zed_ResistModded.DamageTypeModifiers[0].DamageScale[0] = 3.0f;
 			}
 		}
-		//Nerf
+		//Nerf FP
 		if (KFPawn_ZedFleshpound(KFAIController(AI).Pawn) != None)
 		{
+			Zed_ResistModded = KFPawn_Monster(KFAIController(AI).Pawn);
 			Zed_ResistModded.DamageTypeModifiers[0].DamageScale[0] = 0.75f;
 			Zed_ResistModded.DamageTypeModifiers[1].DamageScale[0] = 0.75f;
+			KFPawn_ZedFleshpound(Zed_ResistModded).DefaultGlowColor = CustomEnragedGlowColor;
 		}			
 	}
+	
+}
 
-		
-function ModifyPlayer(Pawn P) // Function to modify the player
-{
-	local PlayerController C;
-	local KFPawn_Human CurKFPH;
-	foreach WorldInfo.AllControllers( class'PlayerController', C)
-    {
-		if( C.bIsPlayer
-        	&& C.PlayerReplicationInfo != none
-        	&& C.PlayerReplicationInfo.bReadyToPlay
-        	&& !C.PlayerReplicationInfo.bOnlySpectator
-        	&& C.GetTeamNum() == 0 ) //Checks for a human player
-			CurKFPH = KFPawn_Human(C.AcknowledgedPawn);
-			CurKFPH.BatteryDrainRate=0;
-			CurKFPH.NVGBatteryDrainRate=0;
+reliable server function ReduceWeaponRecoil(KFWeapon CurKFW,float RecoilMultiplier)
+	{
+			//Reduce Hip-Fire Recoil
+			CurKFW.maxRecoilPitch *= RecoilMultiplier;
+			CurKFW.minRecoilPitch *= RecoilMultiplier;
+			CurKFW.maxRecoilYaw *= RecoilMultiplier;
+			CurKFW.minRecoilYaw *= RecoilMultiplier;
+			//Reduce Iron-Sight Recoil
+			CurKFW.RecoilISMaxYawLimit *= RecoilMultiplier;
+			CurKFW.RecoilISMinYawLimit *= RecoilMultiplier;
+			CurKFW.RecoilISMaxPitchLimit *= RecoilMultiplier;
+			CurKFW.RecoilISMinPitchLimit *= RecoilMultiplier;
+			CurKFW.RecoilRate *= RecoilMultiplier;
+			//CurKFW.HandleRecoil();
+			`log("PerkBuff:- Weapon Recoil " $ CurKFW.class.name $ " is Modified");
 	}
+
+function bool IsKnifeWeapon(KFWeapon CurrentWeapon)
+{
+	if (KFWeap_Edged_Knife(CurrentWeapon) != none)
+		return true;
+	return false;
 }
 
 
+function UpgradeMedicWeapon(KFWeapon CurKFW, int UpgradeIndex)
+{
+	if (KFWeap_MedicBase(CurKFW) != none)
+	{
+		KFWeap_MedicBase(CurKFW).HealAmount *= 1.2f;
+		KFWeap_MedicBase(CurKFW).HealFullRechargeSeconds *= 0.8f;
+	}
+}
+
+function ModifyUpgradedWeapons()
+{
+	local KFWeapon CurKFW;
+	local PlayerController C;
+	local KFPawn_Human CurKFPH;
+	local KFPerk CurKFP;
+	local int PerkMagSize;
+	foreach WorldInfo.AllControllers( class'PlayerController', C)
+	    {
+	    	CurKFPH = KFPawn_Human(C.AcknowledgedPawn);
+	    	CurKFP = CurKFPH.GetPerk();
+	    	if ( IsActivePlayer(C) )
+	    	{
+	    		ForEach CurKFPH.InvManager.InventoryActors(class'KFWeapon', CurKFW)
+				{
+					PerkMagSize = CurKFW.default.MagazineCapacity[0];
+					CurKFP.ModifyMagSizeAndNumber(CurKFW, PerkMagSize);
+					PerkMagSize *= (MagSizeMultiplier ** CurKFW.CurrentWeaponUpgradeIndex);
+					if (CurKFW.InventoryGroup == IG_Equipment)
+					{
+						if ( IsKnifeWeapon(CurKFW) )
+						{
+							KFWeap_Edged_Knife(CurKFW).ParryDamageMitigationPercent = 0.5;
+							KFWeap_Edged_Knife(CurKFW).BlockDamageMitigation = 0.5;
+						}
+						continue;
+					}
+					else if (CurKFW.CurrentWeaponUpgradeIndex > 0 && CurKFW.MagazineCapacity[0] 
+						< PerkMagSize)
+					{
+						CurKFW.MagazineCapacity[0] *= MagSizeMultiplier;
+						CurKFW.MagazineCapacity[1] *= MagSizeMultiplier;
+						CurKFW.InstantHitDamage[2] *= HitDamageMultiplier;
+						CurKFW.InstantHitMomentum[2] *= 1.5f;
+						CurKFW.AmmoPickupScale[0] *= PickupScaleMultiplier;
+						CurKFW.AmmoPickupScale[1] *= PickupScaleMultiplier;
+						CurKFW.Spread[0] *= 0.75f;
+						ReduceWeaponRecoil(CurKFW,0.85f);
+						CurKFW.PenetrationPower[0] += 1.0;
+						UpgradeMedicWeapon(CurKFW, CurKFW.CurrentWeaponUpgradeIndex);
+					}
+					else
+					{
+						CurKFW.BobDamping = 1;
+					}
+					
+					//`log("CurKFW.MagazineCapacity[0] is: " $ CurKFW.MagazineCapacity[0]);
+					//`log("PerkMagSize is: " $ PerkMagSize);
+			    }
+	    	}
+
+		}
+}
+
+
+function ModifyPlayer(Pawn P) // Function to modify the player
+{
+	super.ModifyPlayer(P);
+	SetTimer(15, true, nameof(ModifyUpgradedWeapons));
+}
+
+function bool IsActivePlayer(PlayerController C)
+{
+	if(C.bIsPlayer == false || KFPawn_Human(C.AcknowledgedPawn) == None) //This small check will help loop through all zeds and players quicker
+		    		return false;
+			    else if( C.bIsPlayer
+	        	&& C.PlayerReplicationInfo != none
+	        	&& C.PlayerReplicationInfo.bReadyToPlay
+	        	&& !C.PlayerReplicationInfo.bOnlySpectator
+	        	&& C.GetTeamNum() == 0 ) //Checks for a human player
+				{
+					return true;
+				}
+}
 
 defaultproperties
 {
+	MagSizeMultiplier = 1.15f
+	HitDamageMultiplier = 2.25f
+	PickupScaleMultiplier = 1.5f
+	CustomEnragedGlowColor = (R=0.62f,G=0.47,B=0.93)
 }
